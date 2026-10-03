@@ -1,0 +1,5 @@
+test/**
+.github/**
+images/hover.png
+*.vsix
+.gitignore

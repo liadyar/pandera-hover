@@ -1,0 +1,69 @@
+{
+  "name": "pandera-hover",
+  "displayName": "Pandera Schema Hover",
+  "description": "See a pandera DataFrameModel's columns right in the hover of any DataFrame[Schema]-typed variable, parameter or return value.",
+  "publisher": "liadyar",
+  "version": "0.1.0",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liadyar/pandera-hover.git"
+  },
+  "bugs": {
+    "url": "https://github.com/liadyar/pandera-hover/issues"
+  },
+  "homepage": "https://github.com/liadyar/pandera-hover#readme",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Data Science",
+    "Other"
+  ],
+  "keywords": [
+    "pandera",
+    "pandas",
+    "polars",
+    "dataframe",
+    "schema",
+    "hover",
+    "python",
+    "data validation"
+  ],
+  "activationEvents": [
+    "onLanguage:python"
+  ],
+  "main": "./extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "contributes": {
+    "configuration": {
+      "title": "Pandera Schema Hover",
+      "properties": {
+        "panderaHover.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/venv/**",
+            "**/.venv/**",
+            "**/node_modules/**",
+            "**/site-packages/**",
+            "**/__pycache__/**"
+          ],
+          "markdownDescription": "Glob patterns skipped when a schema class has to be found by scanning `.py` files (used only when the language server's workspace symbols don't find it). Add large data or vendored folders here."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/schemaParser.test.js",
+    "package": "npx --yes @vscode/vsce package"
+  }
+}
