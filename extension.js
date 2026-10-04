@@ -3,12 +3,17 @@
 // Adds a pandera schema's columns to the Python hover. When the Python language
 // server's hover for a symbol mentions `DataFrame[SomeSchema]`, this finds
 // `class SomeSchema`, reads its fields straight from the source and shows them
-// under the language server's text.
+// under the language server's text. When the hovered variable's columns were
+// changed since it got that type (`df = df.drop(columns=[...])`), the changes are
+// traced from the source and shown on top of the schema.
 
 const vscode = require('vscode');
 const { parseClass, findClassLine, formatFields } = require('./schemaParser');
+const { traceColumns, applySteps, formatTrace, detectFlavor } = require('./columnTracker');
 
 const FRAME_TYPE = /\b(?:DataFrame|GeoDataFrame|LazyFrame)\[\s*([\w.]+)\s*\]/g;
+// Any frame type, schema or not: `df.drop(...)` is often typed as a plain DataFrame.
+const FRAME_ANY = /\b(?:DataFrame|GeoDataFrame|LazyFrame)\b/;
 // Base classes that end the inheritance walk (their own fields aren't columns).
 const ROOT_BASES = new Set(['DataFrameModel', 'SchemaModel', 'BaseModel']);
 // Type arguments that are never a schema class, so not worth looking up.
@@ -123,20 +128,63 @@ async function collectFields(name, fromUri, depth = 0) {
   return { fields: [...byName.values()], uri: found.uri, line: found.line };
 }
 
-async function provideHover(document, position, token) {
+// Every provider's hover text at `position`, or undefined when that hover is the
+// one already being answered (so the nested call to ourselves returns nothing).
+async function hoverAt(document, position) {
   const key = `${document.uri.toString()}:${position.line}:${position.character}`;
   if (inFlight.has(key)) return undefined;
 
   inFlight.add(key);
-  let text;
   try {
-    text = hoverText(await vscode.commands.executeCommand('vscode.executeHoverProvider', document.uri, position));
+    return hoverText(await vscode.commands.executeCommand('vscode.executeHoverProvider', document.uri, position));
   } finally {
     inFlight.delete(key);
   }
+}
 
-  const names = [...new Set([...text.matchAll(FRAME_TYPE)].map((m) => m[1].split('.').pop()))]
+function schemaNames(text) {
+  return [...new Set([...text.matchAll(FRAME_TYPE)].map((m) => m[1].split('.').pop()))]
     .filter((name) => !NOT_SCHEMAS.has(name));
+}
+
+// For a variable whose columns were changed since it got its schema (`df = df.drop(...)`),
+// returns { names, origin, steps }: the schemas at the origin and the changes after it.
+async function traceAt(document, position, text) {
+  const range = document.getWordRangeAtPosition(position, /[A-Za-z_]\w*/);
+  if (!range) return undefined;
+  const before = document.lineAt(range.start.line).text.slice(0, range.start.character);
+  if (/\.\s*$/.test(before)) return undefined; // an attribute, not a variable
+
+  const source = document.getText();
+  let trace;
+  try {
+    trace = traceColumns(
+      source.split(/\r?\n/),
+      document.getText(range),
+      range.start.line,
+      range.start.character,
+      detectFlavor(source, text),
+    );
+  } catch (err) {
+    console.error('pandera-hover: column tracing failed', err); // fall back to the plain schema
+    return undefined;
+  }
+  // A variable derived from another one comes with fallbacks, deepest origin first.
+  for (let t = trace; t; t = t.fallback) {
+    if (!t.steps.length) continue;
+    const originText = await hoverAt(document, new vscode.Position(t.origin.line, t.origin.character));
+    const names = originText ? schemaNames(originText) : [];
+    if (names.length) return { names, origin: t.origin, steps: t.steps };
+  }
+  return undefined;
+}
+
+async function provideHover(document, position, token) {
+  const text = await hoverAt(document, position);
+  if (text === undefined || token.isCancellationRequested) return undefined;
+
+  const traced = FRAME_ANY.test(text) ? await traceAt(document, position, text) : undefined;
+  const names = traced ? traced.names : schemaNames(text);
   if (!names.length || token.isCancellationRequested) return undefined;
 
   const md = new vscode.MarkdownString();
@@ -146,8 +194,18 @@ async function provideHover(document, position, token) {
     if (!schema) continue;
     const target = schema.uri.with({ fragment: `L${schema.line + 1}` });
     const file = vscode.workspace.asRelativePath(schema.uri);
-    md.appendMarkdown(`**${name}** — [${file}:${schema.line + 1}](${target.toString()})\n`);
-    md.appendCodeblock(formatFields(schema.fields), 'python');
+    const link = `**${name}** — [${file}:${schema.line + 1}](${target.toString()})`;
+    if (!traced) {
+      md.appendMarkdown(`${link}\n`);
+      md.appendCodeblock(formatFields(schema.fields), 'python');
+      continue;
+    }
+    const { columns, notes } = applySteps(schema.fields, traced.steps);
+    md.appendMarkdown(`${link} · with changes since line ${traced.origin.line + 1}\n`);
+    md.appendCodeblock(formatTrace(columns), 'diff');
+    for (const note of notes) {
+      md.appendMarkdown(`\n- Line ${note.line}: ${note.text}${note.maybe ? ' (only on some paths)' : ''}\n`);
+    }
   }
   return md.value ? new vscode.Hover(md) : undefined;
 }

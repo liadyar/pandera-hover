@@ -128,4 +128,4 @@ function formatFields(fields) {
     .join('\n');
 }
 
-module.exports = { parseClass, findClassLine, formatFields, splitDefault, scan };
+module.exports = { parseClass, findClassLine, formatFields, describeDefault, splitDefault, scan };

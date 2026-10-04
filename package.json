@@ -3,7 +3,7 @@
   "displayName": "Pandera Schema Hover",
   "description": "See a pandera DataFrameModel's columns right in the hover of any DataFrame[Schema]-typed variable, parameter or return value.",
   "publisher": "liadyar",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "license": "MIT",
   "icon": "images/icon.png",
   "repository": {
@@ -63,7 +63,7 @@
     }
   },
   "scripts": {
-    "test": "node --test test/schemaParser.test.js",
+    "test": "node --test test/schemaParser.test.js test/columnTracker.test.js",
     "package": "npx --yes @vscode/vsce package"
   }
 }
